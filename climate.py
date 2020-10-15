@@ -91,6 +91,7 @@ class AwesomeHeater(ClimateEntity):
         self._nobo = hub
         self._name = self._nobo.zones[self._id]['name']
         self._current_mode = HVAC_MODE_AUTO
+        self._current_operation = PRESET_NONE
 
         self.update()
 
@@ -166,16 +167,13 @@ class AwesomeHeater(ClimateEntity):
             return float(self._current_temperature)
         return None
 
+
     def set_hvac_mode(self, hvac_mode):
-        """Set HVAC mode to comfort(HEAT) or back to normal(AUTO)"""
-        if hvac_mode == HVAC_MODE_AUTO:
-            self.set_preset_mode(PRESET_NONE)
-            self._current_mode = hvac_mode
-        elif hvac_mode == HVAC_MODE_HEAT:
-            self.set_preset_mode(PRESET_COMFORT)
-            self._current_mode = hvac_mode
+        pass
+
 
     def set_preset_mode(self, operation_mode):
+        _LOGGER.info("set_preset_mode %s", operation_mode)
         """Set new zone override."""
         if self._nobo.zones[self._id]['override_allowed'] == '1':
             if operation_mode == PRESET_ECO:
@@ -186,9 +184,20 @@ class AwesomeHeater(ClimateEntity):
                 mode = self._nobo.API.OVERRIDE_MODE_COMFORT
             else: #PRESET_NONE
                 mode = self._nobo.API.OVERRIDE_MODE_NORMAL
-            self._nobo.create_override(mode, self._nobo.API.OVERRIDE_TYPE_CONSTANT, self._nobo.API.OVERRIDE_TARGET_ZONE, self._id)
-            #TODO: override to program if new operation mode == current week profile status
+
+            # Override to program if new operation mode == current week profile status
+            week_profile_status = self._nobo.get_week_profile_status(self._nobo.zones[self._id]['week_profile_id'], dt_util.now())
+            _LOGGER.info("week_profile_status = %s", week_profile_status)
+            program_mode = self._nobo.API.DICT_NAME_TO_OVERRIDE_MODE.get(week_profile_status, -1)
+            _LOGGER.info("program_mode = '%s', mode = '%s'", program_mode, mode)
+            if mode == program_mode:
+                _LOGGER.info("create_override with OVERRIDE_MODE_NORMAL")
+                self._nobo.create_override(self._nobo.API.OVERRIDE_MODE_NORMAL, self._nobo.API.OVERRIDE_TYPE_NOW, self._nobo.API.OVERRIDE_TARGET_ZONE, self._id)
+            else:
+                _LOGGER.info("create_override with OVERRIDE_TYPE_CONSTANT")
+                self._nobo.create_override(mode, self._nobo.API.OVERRIDE_TYPE_CONSTANT, self._nobo.API.OVERRIDE_TARGET_ZONE, self._id)
         self.schedule_update_ha_state()
+
 
     def set_temperature(self, **kwargs):
         """Set new target temperature."""
@@ -217,6 +226,7 @@ class AwesomeHeater(ClimateEntity):
             self._current_operation = PRESET_ECO
         elif state == self._nobo.API.NAME_COMFORT:
             self._current_operation = PRESET_COMFORT
+            self._current_mode = HVAC_MODE_HEAT
 
         if self._nobo.zones[self._id]['override_allowed'] == '1':
             for o in self._nobo.overrides:
